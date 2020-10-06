@@ -113,7 +113,7 @@ create_ae_tables <- function(ae_data) {
 		ae_tbl %>%
 		dplyr::group_by(cohort_label) %>%
 		dplyr::summarise(
-			  n = n_distinct(screening_id)
+			  n = dplyr::n_distinct(screening_id)
 			  ) %>%
 		tidyr::spread(key = cohort_label, value = n) %>%
 		dplyr::rowwise() %>%
@@ -126,12 +126,12 @@ create_ae_tables <- function(ae_data) {
 		# Remove all AE-types that are only observed once
 		dplyr::group_by(ae_description_2) %>%
 		tidyr::drop_na(ae_description_2) %>%
-		dplyr::mutate(n_subjects = n_distinct(screening_id)) %>%
+		dplyr::mutate(n_subjects = dplyr::n_distinct(screening_id)) %>%
 		dplyr::filter(n_subjects >= 2) %>%
 		# get number of subjects per cohort with qualifying AE
 		dplyr::group_by(ae_description_2, cohort_label) %>%
 		dplyr::summarise(
-			  n = n_distinct(screening_id)
+			  n = dplyr::n_distinct(screening_id)
 			  ) %>%
 		tidyr::spread(key = cohort_label, val = n, fill = 0) %>%
 		dplyr::ungroup() %>%
@@ -175,7 +175,7 @@ create_ae_tables <- function(ae_data) {
 		dplyr::group_by(cohort_label) %>%
 		tidyr::drop_na(ae_description_2) %>%
 		dplyr::summarise(
-			  n = n()
+			  n = dplyr::n()
 			  ) %>%
 		tidyr::spread(key = cohort_label, value = n) %>%
 		dplyr::rowwise() %>%
@@ -190,10 +190,10 @@ create_ae_tables <- function(ae_data) {
 		# Remove all AE-types that are only observed by one subject
 		dplyr::group_by(ae_description_2) %>%
 		tidyr::drop_na(ae_description_2) %>%
-		dplyr::filter(n_distinct(screening_id) >= 2) %>%
+		dplyr::filter(dplyr::n_distinct(screening_id) >= 2) %>%
 		# Count the number of AEs reported
 		dplyr::group_by(cohort_label, ae_description_2) %>%
-		dplyr::summarise(n = n()) %>%
+		dplyr::summarise(n = dplyr::n()) %>%
 		# Format so cohorts are columns
 		tidyr::spread(key = cohort_label, val = n, fill = 0) %>%
 		# Create "All" col
