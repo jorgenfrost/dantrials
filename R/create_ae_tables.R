@@ -112,7 +112,7 @@ create_ae_tables <- function(ae_data) {
 	persons_per_cohort_tbl <-
 		ae_tbl %>%
 		dplyr::group_by(cohort_label) %>%
-		summarize(
+		dplyr::summarise(
 			  n = n_distinct(screening_id)
 			  ) %>%
 		tidyr::spread(key = cohort_label, value = n) %>%
