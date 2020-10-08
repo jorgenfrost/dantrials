@@ -118,7 +118,8 @@ create_ae_tables <- function(ae_data) {
 		tidyr::spread(key = cohort_label, value = n) %>%
 		dplyr::rowwise() %>%
 		dplyr::mutate(All = sum(dplyr::c_across())) %>%
-		tidyr::gather(key = key, val = `Number of subjects`)
+		tidyr::gather(key = key, val = `Number of subjects`) %>%
+	  column_to_rownames("item")
 
 	# Prepare table
 	subjects_w_common_ae_tbl <-
@@ -162,7 +163,8 @@ create_ae_tables <- function(ae_data) {
 		# Arrange
 		dplyr::left_join(arrange_col) %>%
 		dplyr::arrange(desc(arr_col)) %>%
-		dplyr::select(-arr_col)
+		dplyr::select(-arr_col) %>%
+	  column_to_rownames("ae_description_2")
 
 	tables_ls$table_2 <- subjects_w_common_ae_tbl
 
@@ -224,7 +226,8 @@ create_ae_tables <- function(ae_data) {
 		# Arrange
 		dplyr::left_join(arrange_col) %>%
 		dplyr::arrange(desc(arr_col)) %>%
-		dplyr::select(-arr_col)
+		dplyr::select(-arr_col) %>%
+	  tibble::column_to_rownames("ae_description_2")
 
 	tables_ls$table_3 <- number_of_common_ae_tbl
 
