@@ -8,6 +8,11 @@
 #' @return A list containing the four AE reporting tables.
 #' @export 
 
+# for dev 
+#a e_data <- readr::read_csv("~/job/dantrials/ae_analyse/ae_data.csv")
+
+# TODO: Uniform length of entries (extra spaces)
+
 create_ae_tables <- function(ae_data) {
 
 	# initialise list that collects all the finished tables
@@ -26,28 +31,15 @@ create_ae_tables <- function(ae_data) {
 	ae_tbl <- ae_raw %>%
 		janitor::clean_names(case = "snake")
 
-	# Perform checks ----------------------------------
-	# Check if necessary variables are present in file
-	vars <- c(
-		  "screening_id",
-		  "cohort_label",
-		  "ae_description_2",
-		  "randomization_number", 
-		  "ae_description_2",
-		  "start_date_and_time",
-		  "end_date_and_time",
-		  "outcome",
-		  "severity_label",
-		  "causality_2",
-		  "aesi",
-		  "sae",
-		  "action_taken_with_imp"
-	)
+	# For each subject that have received placebo, change group
+	ae_tbl <- 
+		ae_tbl %>%
+		dplyr::mutate(
+			      group_number = ifelse(treatment_assignment == "placebo", "0", group_number),
+			      group_label = ifelse(treatment_assignment == "placebo", "Placebo", group_label)
+			      )
 
-	if (!all(vars %in% names(ae_tbl))) {
-		missing_vars <- setdiff(vars, names(ae_tbl))
-		stop(paste("Some of the necessary input variables are missing from the input data. The missing variables are:", missing_vars))
-	}
+	# TODO: Create small function that changes the cell values, so that 
 
 	# Prepare table 1 ----------------------------------------------------
 	# Overview of subjects reporting at least one AE
@@ -55,14 +47,14 @@ create_ae_tables <- function(ae_data) {
 	# Find out which subjects has at least one of:
 	any_tbl <-
 		ae_tbl %>%
-		dplyr::group_by(screening_id, cohort_label) %>%
+		dplyr::group_by(subject_id, group_label) %>%
 		dplyr::summarise(
-			  `Any AE` = !anyNA(ae_description_2),
-			  `Any AR` = any(causality_2 == "Related", na.rm = TRUE),
+			  `Any AE` = !anyNA(pt),
+			  `Any AR` = any(causality_coded == "Related", na.rm = TRUE),
 			  `Any AESI` = any(aesi == "Yes", na.rm = TRUE),
 			  `Any SAE` = any(sae == "Yes", na.rm = TRUE),
 			  `Any AE leading to death` = any(outcome == "Fatal", na.rm = TRUE),
-			  `Any AE leading to discontinuation` = any(action_taken_with_imp != "None", na.rm = TRUE),
+			  `Any AE leading to discontinuation` = any(discontinuation == "yes", na.rm = TRUE),
 			  `Number of subjects` = TRUE
 			  ) %>%
 		dplyr::ungroup()
@@ -70,10 +62,10 @@ create_ae_tables <- function(ae_data) {
 	# Sum by number of subjects that qualify by cohort
 	subjects_w_at_least_one_ae_tbl <-
 		any_tbl %>%
-		dplyr::group_by(cohort_label) %>%
+		dplyr::group_by(group_label) %>%
 		dplyr::summarise_if(is.logical, sum) %>%
-		tidyr::gather(-cohort_label, key = item, val = n) %>%
-		tidyr::spread(key = cohort_label, val = n) %>%
+		tidyr::gather(-group_label, key = item, val = n) %>%
+		tidyr::spread(key = group_label, val = n) %>%
 		dplyr::rowwise() %>%
 		dplyr::mutate(All = sum(dplyr::c_across(-item))) 
 
@@ -112,11 +104,11 @@ create_ae_tables <- function(ae_data) {
 	# Grab number of subjects by cohort (a bit hacky)
 	persons_per_cohort_tbl <-
 		ae_tbl %>%
-		dplyr::group_by(cohort_label) %>%
+		dplyr::group_by(group_label) %>%
 		dplyr::summarise(
-			  n = dplyr::n_distinct(screening_id)
+			  n = dplyr::n_distinct(subject_id)
 			  ) %>%
-		tidyr::spread(key = cohort_label, value = n) %>%
+		tidyr::spread(key = group_label, value = n) %>%
 		dplyr::rowwise() %>%
 		dplyr::mutate(All = sum(dplyr::c_across())) %>%
 		tidyr::gather(key = key, val = `Number of subjects`) 
@@ -125,32 +117,32 @@ create_ae_tables <- function(ae_data) {
 	subjects_w_common_ae_tbl <-
 		ae_tbl %>%
 		# Remove all AE-types that are only observed once
-		dplyr::group_by(ae_description_2) %>%
-		tidyr::drop_na(ae_description_2) %>%
-		dplyr::mutate(n_subjects = dplyr::n_distinct(screening_id)) %>%
+		dplyr::group_by(pt) %>%
+		tidyr::drop_na(pt) %>%
+		dplyr::mutate(n_subjects = dplyr::n_distinct(subject_id)) %>%
 		dplyr::filter(n_subjects >= 2) %>%
 		# get number of subjects per cohort with qualifying AE
-		dplyr::group_by(ae_description_2, cohort_label) %>%
+		dplyr::group_by(pt, group_label) %>%
 		dplyr::summarise(
-			  n = dplyr::n_distinct(screening_id)
+			  n = dplyr::n_distinct(subject_id)
 			  ) %>%
-		tidyr::spread(key = cohort_label, val = n, fill = 0) %>%
+		tidyr::spread(key = group_label, val = n, fill = 0) %>%
 		dplyr::ungroup() %>%
 		dplyr::rowwise() %>%
-		dplyr::mutate(All = sum(dplyr::c_across(-c(ae_description_2)))) %>%
+		dplyr::mutate(All = sum(dplyr::c_across(-c(pt)))) %>%
 		# Reshape so persons_per_cohort_tbl fits
-		tidyr::gather(-ae_description_2, key = key, val = val) %>%
-		tidyr::spread(key = ae_description_2, val = val) %>%
+		tidyr::gather(-pt, key = key, val = val) %>%
+		tidyr::spread(key = pt, val = val) %>%
 		dplyr::left_join(persons_per_cohort_tbl) 
 
 	# Create arrange column
 	arrange_col <- 
 		subjects_w_common_ae_tbl %>%
-		tidyr::gather(-key, key = ae_description_2, val = val) %>%
+		tidyr::gather(-key, key = pt, val = val) %>%
 		tidyr::spread(key = key, val = val) %>%
 		dplyr::arrange(desc(All)) %>%
 		dplyr::mutate(arr_col = All) %>%
-		dplyr::select(ae_description_2, arr_col)
+		dplyr::select(pt, arr_col)
 
 	# Add parenthesis with percentage share of cohort total
 	subjects_w_common_ae_tbl <- 
@@ -158,13 +150,13 @@ create_ae_tables <- function(ae_data) {
 		# Add parenthesis
 		dplyr::mutate_if(is.numeric, ~ stringr::str_glue("{.x} ({round(.x/`Number of subjects` * 100, 1)}%)")) %>%
 		# reshape back to output format
-		tidyr::gather(-key, key = ae_description_2, val = val) %>%
+		tidyr::gather(-key, key = pt, val = val) %>%
 		tidyr::spread(key = key, val = val) %>% 
 		# Arrange
 		dplyr::left_join(arrange_col) %>%
 		dplyr::arrange(desc(arr_col)) %>%
 		dplyr::select(-arr_col) %>%
-		tibble::column_to_rownames("ae_description_2")
+		tibble::column_to_rownames("pt")
 
 	tables_ls$table_2 <- subjects_w_common_ae_tbl
 
@@ -174,12 +166,12 @@ create_ae_tables <- function(ae_data) {
 	# Get table of AEs by cohort
 	ae_per_cohort_tbl <- 
 		ae_tbl %>%
-		dplyr::group_by(cohort_label) %>%
-		tidyr::drop_na(ae_description_2) %>%
+		dplyr::group_by(group_label) %>%
+		tidyr::drop_na(pt) %>%
 		dplyr::summarise(
 			  n = dplyr::n()
 			  ) %>%
-		tidyr::spread(key = cohort_label, value = n) %>%
+		tidyr::spread(key = group_label, value = n) %>%
 		dplyr::rowwise() %>%
 		dplyr::mutate(
 		       All = sum(dplyr::c_across())
@@ -190,30 +182,30 @@ create_ae_tables <- function(ae_data) {
 	number_of_common_ae_tbl <-
 		ae_tbl %>%
 		# Remove all AE-types that are only observed by one subject
-		dplyr::group_by(ae_description_2) %>%
-		tidyr::drop_na(ae_description_2) %>%
-		dplyr::filter(dplyr::n_distinct(screening_id) >= 2) %>%
+		dplyr::group_by(pt) %>%
+		tidyr::drop_na(pt) %>%
+		dplyr::filter(dplyr::n_distinct(subject_id) >= 2) %>%
 		# Count the number of AEs reported
-		dplyr::group_by(cohort_label, ae_description_2) %>%
+		dplyr::group_by(group_label, pt) %>%
 		dplyr::summarise(n = dplyr::n()) %>%
 		# Format so cohorts are columns
-		tidyr::spread(key = cohort_label, val = n, fill = 0) %>%
+		tidyr::spread(key = group_label, val = n, fill = 0) %>%
 		# Create "All" col
 		dplyr::rowwise() %>%
-		dplyr::mutate(All = sum(dplyr::c_across(-ae_description_2))) %>%
+		dplyr::mutate(All = sum(dplyr::c_across(-pt))) %>%
 		# reshape so ae_per_cohort_tbl fits
-		tidyr::gather(-ae_description_2, key = key, val = val) %>%
-		tidyr::spread(key = ae_description_2, val = val) %>%
+		tidyr::gather(-pt, key = key, val = val) %>%
+		tidyr::spread(key = pt, val = val) %>%
 		dplyr::left_join(ae_per_cohort_tbl)
 
 	# Create arrange column
 	arrange_col <- 
 		number_of_common_ae_tbl %>%
-		tidyr::gather(-key, key = ae_description_2, val = val) %>%
+		tidyr::gather(-key, key = pt, val = val) %>%
 		tidyr::spread(key = key, val = val) %>%
 		dplyr::arrange(desc(All)) %>%
 		dplyr::mutate(arr_col = All) %>%
-		dplyr::select(ae_description_2, arr_col)
+		dplyr::select(pt, arr_col)
 
 	# Add parenthesis with percentage share of cohort total
 	number_of_common_ae_tbl <-
@@ -221,13 +213,13 @@ create_ae_tables <- function(ae_data) {
 		# Add parenthesis
 		dplyr::mutate_if(is.numeric, ~ stringr::str_glue("{.x} ({round(.x/`Number of adverse events` * 100, 1)}%)")) %>%
 		# reshape back to output format
-		tidyr::gather(-key, key = ae_description_2, val = val) %>%
+		tidyr::gather(-key, key = pt, val = val) %>%
 		tidyr::spread(key = key, val = val) %>% 
 		# Arrange
 		dplyr::left_join(arrange_col) %>%
 		dplyr::arrange(desc(arr_col)) %>%
 		dplyr::select(-arr_col) %>%
-		tibble::column_to_rownames("ae_description_2")
+		tibble::column_to_rownames("pt")
 
 	tables_ls$table_3 <- number_of_common_ae_tbl
 
@@ -236,17 +228,19 @@ create_ae_tables <- function(ae_data) {
 
 	all_ae_tbl <-
 		ae_tbl %>%
-		tidyr::drop_na(ae_description_2) %>%
-		dplyr::arrange(cohort_label, randomization_number, start_date_and_time) %>%
+		tidyr::drop_na(pt) %>%
+		dplyr::arrange(group_label, randomisation_id, start_date) %>%
 		dplyr::select(
-		       `Cohort` = cohort_label,
-		       `Rnd. Number` = randomization_number,
-		       `AE description` = ae_description_2,
-		       Start = start_date_and_time,
-		       End = end_date_and_time,
+		       `Group` = group_label,
+		       `Rnd. ID` = randomisation_id,
+		       `PT` = pt,
+		       `Start Date`= start_date,
+		       `Start Time`= start_time,
+		       `End Date` = end_date,
+		       `End Time` = end_time,
 		       Outcome = outcome,
-		       `Sev.` = severity_label,
-		       Causality = causality_2
+		       `Severity` = severity_label,
+		       Causality = causality_coded
 		)
 
 	tables_ls$table_4 <- all_ae_tbl
@@ -256,4 +250,3 @@ create_ae_tables <- function(ae_data) {
 	return(tables_ls)
 
 }
-
