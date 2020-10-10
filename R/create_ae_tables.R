@@ -9,9 +9,10 @@
 #' @export 
 
 # for dev 
-#a e_data <- readr::read_csv("~/job/dantrials/ae_analyse/ae_data.csv")
+# ae_data <- readr::read_csv("~/job/dantrials/ae_analyse/ae_data.csv")
 
-# TODO: Uniform length of entries (extra spaces)
+# TODO: Maybe alter the "Number of xxx"-entries (100%) to something like N = ....
+
 
 create_ae_tables <- function(ae_data) {
 
@@ -35,11 +36,36 @@ create_ae_tables <- function(ae_data) {
 	ae_tbl <- 
 		ae_tbl %>%
 		dplyr::mutate(
-			      group_number = ifelse(treatment_assignment == "placebo", "0", group_number),
-			      group_label = ifelse(treatment_assignment == "placebo", "Placebo", group_label)
+			      group_number = ifelse(!is.na(treatment_assignment) & treatment_assignment == "placebo", "0", group_number),
+			      group_label = ifelse(!is.na(treatment_assignment) & treatment_assignment == "placebo", "Placebo", group_label)
 			      )
 
-	# TODO: Create small function that changes the cell values, so that 
+	# TODO: Create small function that formats cell values, so that they are q so that  values are aligned.
+	# If the first number is two digits, there should be no spaces before. If the first number
+	# is one digit, there should be a single space before. IF the percentage number is two digits,
+	# it should be padded by a single digit, if it is a single digit it should be padded by two spaces.
+
+		
+		format_cells <- function(x, y){
+
+			# Get values
+			input_val <- x
+			percentage_val <- round((x/y) * 100, 1)
+
+			# Don't include digits if percentage == 100, if not use 1 (even if non signif)
+			percentage_val <- ifelse(percentage_val == 100,
+						 as.character(percentage_val),
+						 format(percentage_val, nsmall = 1, trim = TRUE))
+
+			percentage_str <- paste0("(", percentage_val, "%)")
+
+			# Pad with spaces to align 
+			input_str <- stringr::str_pad(input_val, width = 2, side = 'left', pad = ' ')
+			percentage_str <- stringr::str_pad(percentage_str, width = 8, side = 'left', pad = ' ')
+
+			# Glue them value and percentage together
+			paste0(input_str, percentage_str)
+		}
 
 	# Prepare table 1 ----------------------------------------------------
 	# Overview of subjects reporting at least one AE
@@ -85,7 +111,7 @@ create_ae_tables <- function(ae_data) {
 		tidyr::gather(-item, key = col, val = val) %>%
 		tidyr::spread(key = item, val = val) %>%
 		dplyr::mutate_if(
-			  is.numeric, ~ stringr::str_glue("{.x} ({round(.x/`Number of subjects` * 100, 1)}%)")
+			  is.numeric, ~ format_cells(x = .x, y = `Number of subjects`)
 			  ) %>%
 		tidyr::gather(-col, key = item, val = val) %>%
 		tidyr::spread(key = col, val = val) %>%
@@ -148,7 +174,9 @@ create_ae_tables <- function(ae_data) {
 	subjects_w_common_ae_tbl <- 
 		subjects_w_common_ae_tbl %>%
 		# Add parenthesis
-		dplyr::mutate_if(is.numeric, ~ stringr::str_glue("{.x} ({round(.x/`Number of subjects` * 100, 1)}%)")) %>%
+		dplyr::mutate_if(
+				 is.numeric, ~ format_cells(x = .x, y = `Number of subjects`)
+				 ) %>%
 		# reshape back to output format
 		tidyr::gather(-key, key = pt, val = val) %>%
 		tidyr::spread(key = key, val = val) %>% 
@@ -211,7 +239,9 @@ create_ae_tables <- function(ae_data) {
 	number_of_common_ae_tbl <-
 		number_of_common_ae_tbl %>%
 		# Add parenthesis
-		dplyr::mutate_if(is.numeric, ~ stringr::str_glue("{.x} ({round(.x/`Number of adverse events` * 100, 1)}%)")) %>%
+		dplyr::mutate_if(
+				 is.numeric, ~ format_cells(x = .x, y = `Number of adverse events`)
+				 ) %>%
 		# reshape back to output format
 		tidyr::gather(-key, key = pt, val = val) %>%
 		tidyr::spread(key = key, val = val) %>% 
