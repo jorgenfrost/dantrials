@@ -10,9 +10,7 @@
 
 # for dev 
 # ae_data <- readr::read_csv("~/job/dantrials/ae_analyse/ae_data.csv")
-
-# TODO: Maybe alter the "Number of xxx"-entries (100%) to something like N = ....
-
+# ae_data <- readr::read_csv("~/job/dantrials/ae_analyse/ae_data_test.csv")
 
 create_ae_tables <- function(ae_data) {
 
@@ -28,6 +26,7 @@ create_ae_tables <- function(ae_data) {
 		stop("`ae_data` is not a string (path to data), or a data frame. Stopping.")
 	}
 
+	# Setup + define helper functions and lookup tbl ----------------------
 	# Clean up any bad names
 	ae_tbl <- ae_raw %>%
 		janitor::clean_names(case = "snake")
@@ -36,11 +35,11 @@ create_ae_tables <- function(ae_data) {
 	ae_tbl <- 
 		ae_tbl %>%
 		dplyr::mutate(
-			      group_number = ifelse(!is.na(treatment_assignment) & treatment_assignment == "placebo", "0", group_number),
-			      group_label = ifelse(!is.na(treatment_assignment) & treatment_assignment == "placebo", "Placebo", group_label)
+			      group_number = ifelse(!is.na(treatment_assignment) & stringr::str_to_lower(treatment_assignment) == "placebo", "0", group_number),
+			      group_label = ifelse(!is.na(treatment_assignment) & stringr::str_to_lower(treatment_assignment) == "placebo", "Placebo", group_label)
 			      )
 
-	# TODO: Create small function that formats cell values, so that they are q so that  values are aligned.
+	# Small function that formats cell values, so that they are q so that  values are aligned.
 	# If the first number is two digits, there should be no spaces before. If the first number
 	# is one digit, there should be a single space before. IF the percentage number is two digits,
 	# it should be padded by a single digit, if it is a single digit it should be padded by two spaces.
@@ -67,13 +66,39 @@ create_ae_tables <- function(ae_data) {
 			paste0(input_str, percentage_str)
 		}
 
+
+		# Create lookup table to change column names. The lookup table is used by the following format_colname function.
+		group_lookup_tbl <- 
+			ae_tbl %>%
+			dplyr::select(group_number, group_label) %>%
+			dplyr::distinct()
+
+		# Small function that changes the column names (to be used within rename_with).
+		# If the column name is not "All", it grabs the group label that corresponds 
+		# the group number (which is used to group the data with throughout).
+
+		format_colname <- function(x, lookup) {
+
+			name_changer <- function(x, lookup){
+				if (x == "All") {
+					return(x) 
+				} else if (!(x %in% lookup$group_number)) {
+				stop("x is not in the lookup table keys")
+				} else {
+					index <- lookup$group_number == x
+					return(lookup$group_label[index])
+				}
+			}
+			return(purrr::map_chr(x, name_changer, lookup = group_lookup_tbl))
+		}
+
 	# Prepare table 1 ----------------------------------------------------
 	# Overview of subjects reporting at least one AE
 
 	# Find out which subjects has at least one of:
 	any_tbl <-
 		ae_tbl %>%
-		dplyr::group_by(subject_id, group_label) %>%
+		dplyr::group_by(subject_id, group_number) %>%
 		dplyr::summarise(
 			  `Any AE` = !anyNA(pt),
 			  `Any AR` = any(causality_coded == "Related", na.rm = TRUE),
@@ -88,10 +113,11 @@ create_ae_tables <- function(ae_data) {
 	# Sum by number of subjects that qualify by cohort
 	subjects_w_at_least_one_ae_tbl <-
 		any_tbl %>%
-		dplyr::group_by(group_label) %>%
+		dplyr::group_by(group_number) %>%
 		dplyr::summarise_if(is.logical, sum) %>%
-		tidyr::gather(-group_label, key = item, val = n) %>%
-		tidyr::spread(key = group_label, val = n) %>%
+		tidyr::gather(-group_number, key = item, val = n) %>%
+		dplyr::arrange(group_number) %>%
+		tidyr::spread(key = group_number, val = n) %>%
 		dplyr::rowwise() %>%
 		dplyr::mutate(All = sum(dplyr::c_across(-item))) 
 
@@ -119,7 +145,9 @@ create_ae_tables <- function(ae_data) {
 		dplyr::left_join(arrange_col) %>%
 		dplyr::arrange(desc(arr_col)) %>%
 		dplyr::select(-arr_col) %>%
-		tibble::column_to_rownames("item")
+		tibble::column_to_rownames("item") %>%
+		dplyr::rename_with(format_colname, lookup = group_lookup_tbl)
+
 
 	tables_ls$table_1 <- subjects_w_at_least_one_ae_tbl
 
@@ -130,11 +158,11 @@ create_ae_tables <- function(ae_data) {
 	# Grab number of subjects by cohort (a bit hacky)
 	persons_per_cohort_tbl <-
 		ae_tbl %>%
-		dplyr::group_by(group_label) %>%
+		dplyr::group_by(group_number) %>%
 		dplyr::summarise(
 			  n = dplyr::n_distinct(subject_id)
 			  ) %>%
-		tidyr::spread(key = group_label, value = n) %>%
+		tidyr::spread(key = group_number, value = n) %>%
 		dplyr::rowwise() %>%
 		dplyr::mutate(All = sum(dplyr::c_across())) %>%
 		tidyr::gather(key = key, val = `Number of subjects`) 
@@ -148,18 +176,21 @@ create_ae_tables <- function(ae_data) {
 		dplyr::mutate(n_subjects = dplyr::n_distinct(subject_id)) %>%
 		dplyr::filter(n_subjects >= 2) %>%
 		# get number of subjects per cohort with qualifying AE
-		dplyr::group_by(pt, group_label) %>%
+		dplyr::group_by(pt, group_number) %>%
 		dplyr::summarise(
 			  n = dplyr::n_distinct(subject_id)
 			  ) %>%
-		tidyr::spread(key = group_label, val = n, fill = 0) %>%
+		tidyr::spread(key = group_number, val = n, fill = 0) %>%
 		dplyr::ungroup() %>%
 		dplyr::rowwise() %>%
 		dplyr::mutate(All = sum(dplyr::c_across(-c(pt)))) %>%
 		# Reshape so persons_per_cohort_tbl fits
 		tidyr::gather(-pt, key = key, val = val) %>%
 		tidyr::spread(key = pt, val = val) %>%
-		dplyr::left_join(persons_per_cohort_tbl) 
+		dplyr::full_join(persons_per_cohort_tbl) %>%
+		# groups with no AEs that were oberserved multiple times will have NA values, but should have 0 vals (fx Placebo group).
+		# change NA to 0
+		dplyr::mutate_if(is.numeric, ~ ifelse(is.na(.x), 0, .x))
 
 	# Create arrange column
 	arrange_col <- 
@@ -184,7 +215,8 @@ create_ae_tables <- function(ae_data) {
 		dplyr::left_join(arrange_col) %>%
 		dplyr::arrange(desc(arr_col)) %>%
 		dplyr::select(-arr_col) %>%
-		tibble::column_to_rownames("pt")
+		tibble::column_to_rownames("pt") %>%
+		dplyr::rename_with(format_colname, lookup = group_lookup_tbl)
 
 	tables_ls$table_2 <- subjects_w_common_ae_tbl
 
@@ -194,12 +226,12 @@ create_ae_tables <- function(ae_data) {
 	# Get table of AEs by cohort
 	ae_per_cohort_tbl <- 
 		ae_tbl %>%
-		dplyr::group_by(group_label) %>%
 		tidyr::drop_na(pt) %>%
+		dplyr::group_by(group_number) %>%
 		dplyr::summarise(
 			  n = dplyr::n()
 			  ) %>%
-		tidyr::spread(key = group_label, value = n) %>%
+		tidyr::spread(key = group_number, value = n) %>%
 		dplyr::rowwise() %>%
 		dplyr::mutate(
 		       All = sum(dplyr::c_across())
@@ -214,17 +246,21 @@ create_ae_tables <- function(ae_data) {
 		tidyr::drop_na(pt) %>%
 		dplyr::filter(dplyr::n_distinct(subject_id) >= 2) %>%
 		# Count the number of AEs reported
-		dplyr::group_by(group_label, pt) %>%
+		dplyr::group_by(group_number, pt) %>%
 		dplyr::summarise(n = dplyr::n()) %>%
 		# Format so cohorts are columns
-		tidyr::spread(key = group_label, val = n, fill = 0) %>%
+		tidyr::spread(key = group_number, val = n, fill = 0) %>%
 		# Create "All" col
 		dplyr::rowwise() %>%
 		dplyr::mutate(All = sum(dplyr::c_across(-pt))) %>%
 		# reshape so ae_per_cohort_tbl fits
 		tidyr::gather(-pt, key = key, val = val) %>%
 		tidyr::spread(key = pt, val = val) %>%
-		dplyr::left_join(ae_per_cohort_tbl)
+		dplyr::full_join(ae_per_cohort_tbl) %>%
+		# Again, non-AE groups won't show up, so I use the 
+		# subjects-per-cohort to force any potential NAs to show, and set them to 0.
+		dplyr::full_join(persons_per_cohort_tbl %>% dplyr::select(-`Number of subjects`)) %>%
+		dplyr::mutate_if(is.numeric, ~ ifelse(is.na(.x), 0, .x))
 
 	# Create arrange column
 	arrange_col <- 
@@ -249,7 +285,8 @@ create_ae_tables <- function(ae_data) {
 		dplyr::left_join(arrange_col) %>%
 		dplyr::arrange(desc(arr_col)) %>%
 		dplyr::select(-arr_col) %>%
-		tibble::column_to_rownames("pt")
+		tibble::column_to_rownames("pt") %>%
+		dplyr::rename_with(format_colname, lookup = group_lookup_tbl)
 
 	tables_ls$table_3 <- number_of_common_ae_tbl
 
@@ -259,7 +296,7 @@ create_ae_tables <- function(ae_data) {
 	all_ae_tbl <-
 		ae_tbl %>%
 		tidyr::drop_na(pt) %>%
-		dplyr::arrange(group_label, randomisation_id, start_date) %>%
+		dplyr::arrange(group_number, randomisation_id, start_date) %>%
 		dplyr::select(
 		       `Group` = group_label,
 		       `Rnd. ID` = randomisation_id,
